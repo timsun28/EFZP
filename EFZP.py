@@ -17,8 +17,9 @@
 
 import re
 import string
+import Internationalization
 
-def parse(email_text, remove_quoted_statements=True):
+def parse(email_text, lang='english', remove_quoted_statements=True):
     email_text = email_text.strip()
     email_text = strip_automated_notation(email_text)    
     if remove_quoted_statements:
@@ -26,12 +27,12 @@ def parse(email_text, remove_quoted_statements=True):
         matches = re.findall(pattern, email_text, re.IGNORECASE + re.DOTALL)
         for m in matches:
             email_text = email_text.replace(m, '"[quote]"')
-    result = { \
-              "salutation":get_salutation(email_text), \
-              "body":get_body(email_text), \
-              "signature":get_signature(email_text), \
-              "reply_text":get_reply_text(email_text) \
-              }
+    result = {
+        "salutation": get_salutation(email_text, lang),
+        "body": get_body(email_text, lang),
+        "signature": get_signature(email_text, lang),
+        "reply_text": get_reply_text(email_text)
+    }
     return result
 
 #automated_notation could be any labels or sections in the email giving special notation for
@@ -76,32 +77,15 @@ def get_reply_text(email_text):
     return reply_text
     
 
-def get_signature(email_text):
+def get_signature(email_text, lang):
     
     #try not to have the signature be the very start of the message if we can avoid it
-    salutation = get_salutation(email_text)
+    salutation = get_salutation(email_text, lang)
     if salutation: email_text = email_text[len(salutation):]
     
     #note - these openinged statements *must* be in lower case for 
     #sig within sig searching to work later in this func
-    sig_opening_statements = [
-                              "warm regards",
-                              "kind regards",
-                              "regards",
-                              "cheers",
-                              "many thanks",
-                              "thanks",
-                              "sincerely",
-                              "ciao",
-                              "Best",
-                              "bGIF",
-                              "thank you",
-                              "thankyou",
-                              "talk soon",
-                              "cordially",
-                              "yours truly",
-                              "thanking You",
-                              "sent from my iphone"]
+    sig_opening_statements = Internationalization.get_signature(lang)
     pattern = "(?P<signature>(" + string.joinfields(sig_opening_statements, "|") + ")(.)*)"
     groups = re.search(pattern, email_text, re.IGNORECASE + re.DOTALL)
     signature = None
@@ -110,7 +94,8 @@ def get_signature(email_text):
             signature = groups.groupdict()["signature"]
             reply_text = get_reply_text(email_text[email_text.find(signature):])
             if reply_text: signature = signature.replace(reply_text, "")
-            
+            print(signature)
+
             #search for a sig within current sig to lessen chance of accidentally stealing words from body
             tmp_sig = signature
             for s in sig_opening_statements:
@@ -118,15 +103,15 @@ def get_signature(email_text):
                     tmp_sig = tmp_sig[len(s):]
             groups = re.search(pattern, tmp_sig, re.IGNORECASE + re.DOTALL)
             if groups: signature = groups.groupdict()["signature"]
-        
-    #if no standard formatting has been provided (e.g. Regards, <name>), 
+
+    #if no standard formatting has been provided (e.g. Regards, <name>),
     #try a probabilistic approach by looking for phone numbers, names etc. to derive sig    
     if not signature:
         #body_without_sig = get_body(email_text, check_signature=False)
         pass
     
     #check to see if the entire body of the message has been 'stolen' by the signature. If so, return no sig so body can have it.
-    body_without_sig = get_body(email_text, check_signature=False)
+    body_without_sig = get_body(email_text, lang, check_signature=False)
     if signature==body_without_sig: signature = None
     
     return signature
@@ -141,14 +126,14 @@ def is_word_likely_in_signature(word, text_before="", text_after=""):
     return
     
 #check_<zone> args provided so that other functions can call get_body without causing infinite recursion
-def get_body(email_text, check_salutation=True, check_signature=True, check_reply_text=True):
+def get_body(email_text, lang, check_salutation=True, check_signature=True, check_reply_text=True):
     
     if check_salutation:
-        sal = get_salutation(email_text)
+        sal = get_salutation(email_text, lang)
         if sal: email_text = email_text[len(sal):]
     
     if check_signature:
-        sig = get_signature(email_text)
+        sig = get_signature(email_text, lang)
         if sig: email_text = email_text[:email_text.find(sig)]
     
     if check_reply_text:
@@ -157,29 +142,21 @@ def get_body(email_text, check_salutation=True, check_signature=True, check_repl
             
     return email_text
 
-def get_salutation(email_text):
+def get_salutation(email_text, lang):
     #remove reply text fist (e.g. Thanks\nFrom: email@domain.tld causes salutation to consume start of reply_text
     reply_text = get_reply_text(email_text)
     if reply_text: email_text = email_text[:email_text.find(reply_text)]
     #Notes on regex:
     #Max of 5 words succeeding first Hi/To etc, otherwise is probably an entire sentence
-    salutation_opening_statements = [
-                                     "hi",
-                                     "dear",
-                                     "to",
-                                     "hey",
-                                     "hello",
-                                     "thanks",
-                                     "good morning",
-                                     "good afternoon",
-                                     "good evening",
-                                     "thankyou",
-                                     "thank you"]
+    salutation_opening_statements = Internationalization.get_salutations(lang)
     pattern = "\s*(?P<salutation>(" + string.joinfields(salutation_opening_statements, "|") + ")+(\s*\w*)(\s*\w*)(\s*\w*)(\s*\w*)(\s*\w*)[\.,\xe2:]+\s*)"
     groups = re.match(pattern, email_text, re.IGNORECASE)
+    print(groups)
     salutation = None
     if not groups is None:
         if groups.groupdict().has_key("salutation"):
             salutation = groups.groupdict()["salutation"]
     return salutation
     
+test = get_signature('Beste, Momenteel schrijf ik mijn scriptie over de factoren die van invloed zijn op de inkomensongelijkheid in Nederland. Ik kan op de website van CBS slechts gegevens vinden over de Gini-coefficient en de verschillende inkomensaandelen tussen 2000 en 2014. Ik heb echter een artikel gevonden waar een grafiek is gemaakt van de gegevens vanaf 1990.Uit de betreffende grafiek zijn de gegevens helaas niet precies genoeg af te lezen. Mijn vraag is nu waar ik de gegevens over inkomensongelijkheid en inkomensaandelen over de periode van 1990 - 2016 kan vinden. Alvast bedankt. Vriendelijke groet,Hannah Elenbaas', 'dutch')
+print(test)
